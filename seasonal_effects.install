@@ -1,0 +1,13 @@
+<?php
+/**
+ * @file
+ * Install, update and uninstall functions for Seasonal Effects.
+ */
+
+/**
+ * Implements hook_uninstall().
+ */
+function seasonal_effects_uninstall() {
+  config('seasonal_effects.settings')->delete();
+  state_del('seasonal_effects_active');
+}

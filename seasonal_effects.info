@@ -1,0 +1,6 @@
+name = Seasonal Effects
+description = Light-hearted animations for the seasons - Halloween creatures, Bonfire Night fireworks, Christmas snow, Easter eggs - shown on the dates you choose.
+type = module
+package = User Interface
+backdrop = 1.x
+configure = admin/config/user-interface/seasonal-effects

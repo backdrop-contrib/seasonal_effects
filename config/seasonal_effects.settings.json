@@ -1,0 +1,33 @@
+{
+    "_config_name": "seasonal_effects.settings",
+    "toggle": true,
+    "frequency": 3,
+    "size": "1.4",
+    "effects": {
+        "halloween": {
+            "enabled": true,
+            "start": "10-24",
+            "end": "10-31"
+        },
+        "bonfire_night": {
+            "enabled": true,
+            "start": "11-01",
+            "end": "11-06"
+        },
+        "christmas": {
+            "enabled": true,
+            "start": "12-01",
+            "end": "01-06"
+        },
+        "easter": {
+            "enabled": true,
+            "start": -2,
+            "end": 1
+        },
+        "thanksgiving": {
+            "enabled": false,
+            "start": -3,
+            "end": 1
+        }
+    }
+}

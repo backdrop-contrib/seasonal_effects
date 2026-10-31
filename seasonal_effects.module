@@ -1,0 +1,354 @@
+<?php
+/**
+ * @file
+ * Seasonal Effects: animations laid over the site on chosen dates.
+ *
+ * The module supplies the engine (an overlay the site's CSS cannot reach, an
+ * on/off button the visitor controls, scheduling and settings); each occasion
+ * is a plugin declared through hook_seasonal_effects_info(). Four come with
+ * the module and any other module can add its own.
+ */
+
+/**
+ * Implements hook_config_info().
+ */
+function seasonal_effects_config_info() {
+  $prefixes['seasonal_effects.settings'] = array(
+    'label' => t('Seasonal Effects settings'),
+    'group' => t('User Interface'),
+  );
+  return $prefixes;
+}
+
+/**
+ * Implements hook_permission().
+ */
+function seasonal_effects_permission() {
+  return array(
+    'administer seasonal effects' => array(
+      'title' => t('Administer seasonal effects'),
+      'description' => t('Choose which effects run and when, and preview them.'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_menu().
+ */
+function seasonal_effects_menu() {
+  $items['admin/config/user-interface/seasonal-effects'] = array(
+    'title' => 'Seasonal effects',
+    'description' => 'Choose which seasonal animations run on the site, and when.',
+    'page callback' => 'backdrop_get_form',
+    'page arguments' => array('seasonal_effects_settings_form'),
+    'access arguments' => array('administer seasonal effects'),
+    'file' => 'seasonal_effects.admin.inc',
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_seasonal_effects_info().
+ */
+function seasonal_effects_seasonal_effects_info() {
+  $path = backdrop_get_path('module', 'seasonal_effects') . '/js/effects/';
+  return array(
+    'halloween' => array(
+      'label' => t('Halloween'),
+      'description' => t('Ghosts, bats and spiders drift in from the edges. Click one to banish it.'),
+      'js' => $path . 'halloween.js',
+      'schedule' => 'fixed',
+      'start' => '10-24',
+      'end' => '10-31',
+      'weight' => 0,
+    ),
+    'bonfire_night' => array(
+      'label' => t('Bonfire Night'),
+      'description' => t('Fireworks burst over the page now and then.'),
+      'js' => $path . 'bonfire_night.js',
+      'schedule' => 'fixed',
+      'start' => '11-01',
+      'end' => '11-06',
+      'weight' => 1,
+    ),
+    'christmas' => array(
+      'label' => t('Christmas'),
+      'description' => t('Gentle snow. Now and then a gremlin creeps towards a present - squash him before he steals it.'),
+      'js' => $path . 'christmas.js',
+      'schedule' => 'fixed',
+      'start' => '12-01',
+      'end' => '01-06',
+      'weight' => 2,
+    ),
+    'easter' => array(
+      'label' => t('Easter'),
+      'description' => t('Eggs roll along the bottom of the page. Click one to hatch it.'),
+      'js' => $path . 'easter.js',
+      'schedule' => 'easter',
+      'start' => -2,
+      'end' => 1,
+      'weight' => 3,
+    ),
+    'thanksgiving' => array(
+      'label' => t('Thanksgiving'),
+      'description' => t('Turkeys run about the foot of the page. Click one and it flaps off in a flurry of feathers.'),
+      'js' => $path . 'thanksgiving.js',
+      'schedule' => 'thanksgiving',
+      'start' => -3,
+      'end' => 1,
+      'weight' => 4,
+    ),
+  );
+}
+
+/**
+ * Lists the moving dates an effect can be scheduled around.
+ *
+ * An effect whose 'schedule' is one of these has 'start' and 'end' in days
+ * from that date; 'fixed' has them as MM-DD.
+ *
+ * @return array
+ *   Labels keyed by schedule name.
+ */
+function seasonal_effects_anchors() {
+  return array(
+    'easter' => t('Easter Sunday'),
+    'thanksgiving' => t('Thanksgiving Day (US, the fourth Thursday of November)'),
+  );
+}
+
+/**
+ * Works out the date a moving schedule is counted from.
+ *
+ * @param string $schedule
+ *   A key of seasonal_effects_anchors().
+ * @param int $year
+ *   The year.
+ *
+ * @return string|null
+ *   The date as Y-m-d, or NULL for an unknown schedule.
+ */
+function seasonal_effects_anchor_date($schedule, $year) {
+  switch ($schedule) {
+    case 'easter':
+      return seasonal_effects_easter_sunday($year);
+
+    case 'thanksgiving':
+      return (new DateTime('fourth thursday of november ' . (int) $year))->format('Y-m-d');
+  }
+  return NULL;
+}
+
+/**
+ * Lists the size choices for creatures.
+ *
+ * @return array
+ *   Labels keyed by the stored value: 'random' or a multiplier.
+ */
+function seasonal_effects_sizes() {
+  $sizes = array('random' => t('Random, a mix of sizes'));
+  foreach (array('1', '1.2', '1.4', '1.6', '1.8', '2') as $size) {
+    $sizes[$size] = t('@size×', array('@size' => number_format((float) $size, 1)));
+  }
+  return $sizes;
+}
+
+/**
+ * Returns every effect declared on the site, merged with its saved settings.
+ *
+ * @return array
+ *   Effect definitions keyed by machine name, in weight order. Each carries
+ *   'enabled', 'start' and 'end' as saved, falling back to the plugin's own
+ *   defaults for anything never saved.
+ */
+function seasonal_effects_get_effects() {
+  $effects = &backdrop_static(__FUNCTION__);
+  if (isset($effects)) {
+    return $effects;
+  }
+
+  $effects = module_invoke_all('seasonal_effects_info');
+  backdrop_alter('seasonal_effects_info', $effects);
+  $saved = (array) config_get('seasonal_effects.settings', 'effects');
+
+  foreach ($effects as $name => &$effect) {
+    $effect += array(
+      'description' => '',
+      'schedule' => 'fixed',
+      'weight' => 0,
+    );
+    $effect['enabled'] = isset($saved[$name]['enabled']) ? (bool) $saved[$name]['enabled'] : FALSE;
+    foreach (array('start', 'end') as $key) {
+      if (isset($saved[$name][$key]) && $saved[$name][$key] !== '') {
+        $effect[$key] = $saved[$name][$key];
+      }
+    }
+  }
+  unset($effect);
+  backdrop_sort($effects, array('weight' => SORT_NUMERIC));
+
+  return $effects;
+}
+
+/**
+ * Works out the date of Easter Sunday.
+ *
+ * Done here rather than with easter_days(), which needs PHP's calendar
+ * extension and not every host has it.
+ *
+ * @param int $year
+ *   The year.
+ *
+ * @return string
+ *   Easter Sunday as Y-m-d (Western, Gregorian calendar).
+ */
+function seasonal_effects_easter_sunday($year) {
+  // Anonymous Gregorian algorithm (Meeus/Jones/Butcher).
+  $a = $year % 19;
+  $b = intdiv($year, 100);
+  $c = $year % 100;
+  $d = intdiv($b, 4);
+  $e = $b % 4;
+  $f = intdiv($b + 8, 25);
+  $g = intdiv($b - $f + 1, 3);
+  $h = (19 * $a + $b - $d - $g + 15) % 30;
+  $i = intdiv($c, 4);
+  $k = $c % 4;
+  $l = (32 + 2 * $e + 2 * $i - $h - $k) % 7;
+  $m = intdiv($a + 11 * $h + 22 * $l, 451);
+  $month = intdiv($h + $l - 7 * $m + 114, 31);
+  $day = (($h + $l - 7 * $m + 114) % 31) + 1;
+  return sprintf('%04d-%02d-%02d', $year, $month, $day);
+}
+
+/**
+ * Finds the window of an effect that contains a moment, if any.
+ *
+ * Dates are whole days in the site's time zone, end day included. A fixed
+ * window may run across the new year (1 December to 6 January); a moving one
+ * is counted in days from its anchor date (seasonal_effects_anchors()).
+ *
+ * @param array $effect
+ *   An effect from seasonal_effects_get_effects().
+ * @param int $time
+ *   The moment to test, as a Unix timestamp.
+ *
+ * @return array|false
+ *   array(start, end) as Unix timestamps, end exclusive, or FALSE when the
+ *   moment falls outside the effect's dates.
+ */
+function seasonal_effects_window(array $effect, $time) {
+  $zone = new DateTimeZone(date_default_timezone_get());
+  $now = new DateTime('@' . $time);
+  $now->setTimezone($zone);
+  $year = (int) $now->format('Y');
+
+  // Test the window starting last year as well as this year, which catches one
+  // that crosses the new year.
+  foreach (array($year - 1, $year) as $y) {
+    if ($effect['schedule'] != 'fixed') {
+      $anchor = seasonal_effects_anchor_date($effect['schedule'], $y);
+      if (!$anchor) {
+        return FALSE;
+      }
+      $day = new DateTime($anchor, $zone);
+      $start = (clone $day)->modify((int) $effect['start'] . ' days');
+      $end = (clone $day)->modify(((int) $effect['end'] + 1) . ' days');
+    }
+    else {
+      if (!preg_match('/^\d\d-\d\d$/', $effect['start']) || !preg_match('/^\d\d-\d\d$/', $effect['end'])) {
+        return FALSE;
+      }
+      $start = new DateTime($y . '-' . $effect['start'], $zone);
+      $end_year = $effect['end'] < $effect['start'] ? $y + 1 : $y;
+      $end = (new DateTime($end_year . '-' . $effect['end'], $zone))->modify('+1 day');
+    }
+    if ($now >= $start && $now < $end) {
+      return array($start->getTimestamp(), $end->getTimestamp());
+    }
+  }
+  return FALSE;
+}
+
+/**
+ * Finds the effect that should be running.
+ *
+ * Where enabled effects overlap, the lighter weight wins: one effect at a
+ * time keeps the page readable.
+ *
+ * @param int $time
+ *   The moment to test; defaults to now.
+ *
+ * @return array|false
+ *   array(name, start, end) or FALSE when nothing is due.
+ */
+function seasonal_effects_active($time = NULL) {
+  $time = isset($time) ? $time : REQUEST_TIME;
+  foreach (seasonal_effects_get_effects() as $name => $effect) {
+    if ($effect['enabled'] && ($window = seasonal_effects_window($effect, $time))) {
+      return array($name, $window[0], $window[1]);
+    }
+  }
+  return FALSE;
+}
+
+/**
+ * Implements hook_preprocess_page().
+ *
+ * Adds the engine and the running effect's script to front-end pages. An
+ * administrator can preview any effect, whatever the date, with
+ * ?seasonal-effect=NAME on any page.
+ */
+function seasonal_effects_preprocess_page(&$variables) {
+  if (path_is_admin(current_path())) {
+    return;
+  }
+
+  $effects = seasonal_effects_get_effects();
+  $preview = isset($_GET['seasonal-effect']) ? (string) $_GET['seasonal-effect'] : '';
+
+  if ($preview !== '' && isset($effects[$preview]) && user_access('administer seasonal effects')) {
+    $active = array($preview, REQUEST_TIME, REQUEST_TIME + 86400);
+  }
+  else {
+    $preview = '';
+    $active = seasonal_effects_active();
+  }
+  if (!$active) {
+    return;
+  }
+
+  list($name, , $end) = $active;
+  $module_path = backdrop_get_path('module', 'seasonal_effects');
+
+  backdrop_add_js(array(
+    'seasonalEffects' => array(
+      'effect' => $name,
+      'label' => $effects[$name]['label'],
+      // The browser checks this too, so a page served from the page cache
+      // stops running the effect once its dates have passed.
+      'end' => $end * 1000,
+      'toggle' => (bool) config_get('seasonal_effects.settings', 'toggle'),
+      'frequency' => (int) (config_get('seasonal_effects.settings', 'frequency') ?: 3),
+      'size' => (string) (config_get('seasonal_effects.settings', 'size') ?: '1.4'),
+      'preview' => $preview !== '',
+    ),
+  ), 'setting');
+  backdrop_add_js($module_path . '/js/seasonal_effects.js', array('weight' => 10));
+  backdrop_add_js($effects[$name]['js'], array('weight' => 11));
+}
+
+/**
+ * Implements hook_cron().
+ *
+ * Clears the page cache when an effect starts or ends, so anonymous visitors
+ * see the change rather than the page as it was cached.
+ */
+function seasonal_effects_cron() {
+  $active = seasonal_effects_active();
+  $name = $active ? $active[0] : '';
+  if (state_get('seasonal_effects_active', '') !== $name) {
+    state_set('seasonal_effects_active', $name);
+    cache('page')->flush();
+  }
+}
